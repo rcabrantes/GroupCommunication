@@ -1,0 +1,327 @@
+﻿<!DOCTYPE html>
+<html>
+<head>
+    <title>SignalR Simple Chat</title>
+    <link rel="stylesheet" type="text/css" href="Content/bootstrap.css">
+
+    <style type="text/css">
+        .container {
+            background-color: #99CCFF;
+            border: thick solid #808080;
+            padding: 20px;
+            margin: 20px;
+        }
+
+        .active-group-button {
+            background-color: lightgreen;
+        }
+    </style>
+</head>
+<body>
+    <div id="admin-div" hidden class="panel panel-body">
+        <span>Admin!</span><br />
+        <button id="open-closed-groups">Fechar grupos</button>
+        <button id="step-2-enable">Etapa 2: linha de comando</button>
+        <button id="enable-ack-control">Habilitar controle ack</button>
+    </div>
+    <div id="ack-control" hidden>
+        <button id="set-ack-wait">Esperar ack</button>
+        <button id="set-ack-send">Nao enviar ack</button>
+
+    </div>
+    <div class="send-message-container">
+        <input type="text" id="message-input" />
+        <input type="button" id="sendmessage" value="Send" />
+        <input type="hidden" id="displayname" />
+
+    </div>
+
+    <div class="mesage-command-container" hidden>
+        <span>Comandos digitados aqui serao interpretados e executados:</span>
+        <input type="text" id="message-command" /><button id="command-line-execute">Executar</button>
+
+    </div>
+
+    <hr />
+    <span>Criar um grupo, ingressar em um grupo ou escolher o grupo para enviar mensagens:</span>
+    <div class="group-button-container">
+        <button class="group-button-create" id="create-group-button">Criar novo grupo</button>
+    </div>
+    <button id="leave-current-group" hidden>Sair do grupo</button>
+    <hr />
+    <button class="chat-clear-button">Limpar</button>
+    <ul id="discussion"></ul>
+
+    <script src="Scripts/jquery-3.1.1.min.js"></script>
+    <script src="Scripts/bootstrap.min.js"></script>
+
+    <script src="Scripts/jquery.signalR-2.2.1.min.js"></script>
+    <script src="signalr/hubs"></script>
+    <script type="text/javascript">
+
+        //Grupo atual, para saber para qual grupo enviar mensagens
+        var currentGroup = '';
+
+        //Lista de grupos que o cliente entrou
+        var groupsJoined = [];
+
+        //Informa se os grupos sao abertos
+        var openGroup = true;
+
+        //Informa se o cliente vai enviar o ack ou nao
+        var sendAck = true;
+
+        //informa se o cliente vai esperar que todos os membros do grupo confirmem a mensagem antes de processa-la
+        var shouldWaitForAck = false;
+
+        //Lista de mensagens recebidas mas que ainda estao esperando confirmacao antes de serem processadas
+        var waitingForAck = [];
+
+        //Funcao para ganhar poderes de admin
+        function adminMe(password) {
+            groupCommHub.server.adminMe(password);
+        }
+
+        //Configurar a opcao enviar ack ou nao
+        function setSendAck(value) {
+            sendAck = value;
+        }
+
+        //Configurar a opcao esperar por ack ou nao
+        function setWaitForAck(value) {
+            shouldWaitForAck = value;
+        }
+
+        //Funcoes atribuidas aos botoes, auto explicativas
+        $(document).ready(function () {
+           $('#set-ack-send').click(function () {
+                sendAck = !sendAck;
+                $('#set-ack-send').text(sendAck ? 'Nao enviar ack' : 'Enviar ack');
+
+            });
+
+            $('#set-ack-wait').click(function () {
+                shouldWaitForAck = !shouldWaitForAck;
+                $('#set-ack-wait').text(shouldWaitForAck ? 'Nao esperar por ack' : 'Esperar por ack');
+
+            });
+
+            $('#message-input').keypress(function (e) {
+                if (e.keyCode == 13)
+                    $('#sendmessage').click();
+            });
+
+            $('#command-line-execute').click(function () {
+                eval($('#message-command').val());
+            });
+            $('.chat-clear-button').click(function () {
+                $('#discussion').children().remove();
+            });
+
+            $('#open-closed-groups').click(function () {
+                openGroup = !openGroup;
+                groupCommHub.server.setGroupStatus(openGroup);
+                $('#open-closed-groups').text(openGroup ? 'Fechar grupos' : 'Abrir grupos');
+            });
+
+            $('#step-2-enable').click(function () {
+                groupCommHub.server.setStage('stage2');
+            });
+
+            $('#enable-ack-control').click(function () {
+                groupCommHub.server.setStage('ack-control');
+                $('#enable-ack-control').hide();
+            });
+
+            $('#leave-current-group').click(function () {
+                if (currentGroup) {
+                    $('#group-button-' + currentGroup).text('Entrar no grupo ' + currentGroup);
+                    groupCommHub.server.leaveGroup(currentGroup);
+                    currentGroup = false;
+                    $('.group-button').toggleClass('active-group-button', false);
+                    $('#leave-current-group').hide();
+                }
+            });
+        });
+
+        //Verifica se o cliente faz parte de dado grupo
+        function isMemberOfGroup(groupName) {
+            for (var i = 0; i < groupsJoined.length; i++) {
+                if (groupsJoined[i] == groupName) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        //Procesar a mensagem do servidor que confirma a entrada no grupo
+        function processGroupJoin(groupName) {
+            //Adicionar grupo a lista de grupos
+            if (!isMemberOfGroup(groupName)) {
+                groupsJoined.push(groupName);
+                $('#group-button-' + groupName).text('Grupo ' + groupName);
+            }
+        }
+
+
+        //Clique no botao de grupo: ingressar no grupo se ainda nao fez, e escolher grupo para envio de mensagens
+        function groupButtonClick(groupName) {
+            if (!isMemberOfGroup(groupName)) {
+                groupCommHub.server.joinGroup(groupName);
+            } else {
+                //Remover grupo ativo
+                $('.group-button').toggleClass('active-group-button', false);
+
+                //Marcar esse grupo como ativo
+                $('#group-button-' + groupName).toggleClass('active-group-button', true);
+                currentGroup = groupName;
+                $('#leave-current-group').text('Sair do grupo ' + groupName).show();
+
+            }
+
+        }
+
+        function createGroupButton(groupName) {
+            var button = document.createElement('button');
+            button.id = 'group-button-' + groupName;
+            button.className = 'group-button';
+            button.textContent = 'Entrar no groupo ' + groupName;
+            $('.group-button-container').append(button);
+
+            //Adicionar ganchos no novo botao
+            $(button).click(function () {
+                groupButtonClick(groupName);
+            });
+
+        }
+
+        //Verifica se esta presente e adiciona groupos se necessario
+        function parseGroupList(groups) {
+            //Remover tag de grupo existente dos botoes
+            $('.group-button').toggleClass('group-exist', false);
+
+            for (var i = 0; i < groups.length; i++) {
+                var groupButton = $('#group-button-' + groups[i]);
+                if (groupButton.length == 0) {
+                    //Botao nao existe, criar
+                    createGroupButton(groups[i]);
+                }
+                //Marcar botao com flag dizendo que o grupo existe
+                $('#group-button-' + groups[i]).toggleClass('group-exist', true);
+            }
+            $('.group-button:not(.group-exist)').remove();
+        }
+
+        function displayMessage(sender, message, type, group) {
+
+            var encodedName = $('<div />').text(name).html();
+            var encodedMsg = $('<div />').text(message).html();
+
+            switch (type) {
+                case 'normal':
+                    $('#discussion').append('<li><strong>' + sender
+                    + '</strong>(' + group + '):&nbsp;&nbsp;' + message + '</li>');
+                    break;
+                case 'error':
+
+                    $('#discussion').append('<li style="color:red;"><strong>Erro</strong>:&nbsp;&nbsp;' + message + '</li>');
+                    break;
+            }
+        }
+
+        function sendMessage(group, message) {
+            groupCommHub.server.send(group, $('#displayname').val(), message);
+
+        }
+
+        $(function () {
+            groupCommHub = $.connection.groupCommHub;
+
+            // Create a function that the hub can call to broadcast messages.
+            groupCommHub.client.broadcastMessage = function (group, name, message, messageId) {
+
+                if (sendAck) {
+                    groupCommHub.server.ack(messageId);
+                }
+
+                if (shouldWaitForAck) {
+                    waitingForAck[messageId] = {
+                        group: group,
+                        sender: name,
+                        message: message
+                    };
+                } else {
+                    // Add the message to the page.
+                    displayMessage(name, message, 'normal', group);
+                }
+
+            };
+
+            groupCommHub.client.confirmMessage = function (messageId) {
+                if (shouldWaitForAck) {
+                    if (waitingForAck[messageId]) {
+                        var messageData = waitingForAck[messageId];
+                        displayMessage(messageData.sender, messageData.message, 'normal', messageData.group);
+
+                    }
+
+                }
+            }
+
+            // Create a function that the hub can call to broadcast messages.
+            groupCommHub.client.groupJoinConfirm = function (groupName) {
+
+                processGroupJoin(groupName);
+            };
+
+
+            groupCommHub.client.changeStage = function (newStage) {
+                switch (newStage) {
+                    case "stage2":
+                        $('.mesage-command-container').show();
+                        $('.send-message-container').hide();
+                        break;
+                    case 'ack-control':
+                        $('#ack-control').show();
+                }
+            };
+
+            groupCommHub.client.ackGroupStatus = function (newStatus) {
+                openGroup = newStatus;
+                $('#open-closed-groups').text(openGroup ? 'Fechar grupos' : 'Abrir grupos');
+            };
+
+            groupCommHub.client.groupList = function (groupList) {
+                console.log('Got group list from server: ', groupList);
+                parseGroupList(groupList);
+            };
+
+            groupCommHub.client.youAreAdmin = function () {
+                $('#admin-div').show();
+            };
+
+            $('#displayname').val(prompt('Digite seu nome:', ''));
+            $('#message').focus();
+            $.connection.hub.start().done(function () {
+                //Mensagem de oi
+                groupCommHub.server.hello();
+
+                $('#create-group-button').click(function () {
+                    groupCommHub.server.createGroup();
+                });
+
+                $('#sendmessage').click(function () {
+                    if (!currentGroup) {
+                        displayMessage('', 'Escolha um grupo antes de enviar mensagens.', 'error');
+                    }
+
+                    else {
+                        sendMessage(currentGroup, $('#message-input').val());
+                        $('#message-input').val('').focus();
+                    }
+                });
+            });
+        });
+    </script>
+</body>
+</html>
