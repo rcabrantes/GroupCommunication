@@ -229,21 +229,26 @@
             }
         }
 
+        //Envia mensagem para o servidor
         function sendMessage(group, message) {
             groupCommHub.server.send(group, $('#displayname').val(), message);
 
         }
 
+
+        //Funcoes para configuracao do hub SignalR
         $(function () {
             groupCommHub = $.connection.groupCommHub;
 
             // Create a function that the hub can call to broadcast messages.
             groupCommHub.client.broadcastMessage = function (group, name, message, messageId) {
 
+                //Enviar ack se opcao pedir
                 if (sendAck) {
                     groupCommHub.server.ack(messageId);
                 }
 
+                //Se precisar esperar ack, nao processar mensagem mas adiciona-la na lista de espera
                 if (shouldWaitForAck) {
                     waitingForAck[messageId] = {
                         group: group,
@@ -251,30 +256,31 @@
                         message: message
                     };
                 } else {
-                    // Add the message to the page.
+                    // Caso contrario, exibir (processar) mensagem imediatamente
                     displayMessage(name, message, 'normal', group);
                 }
 
             };
 
+            //Processar confirmacao de mensagem, se opcao estiver setada
             groupCommHub.client.confirmMessage = function (messageId) {
                 if (shouldWaitForAck) {
+                    //Se ainda estiver esperando confirmacao desta mensagem
                     if (waitingForAck[messageId]) {
                         var messageData = waitingForAck[messageId];
+                        //Processar mensagem
                         displayMessage(messageData.sender, messageData.message, 'normal', messageData.group);
-
                     }
-
                 }
             }
 
-            // Create a function that the hub can call to broadcast messages.
+            // Processar confirmacao de entrada no grupo
             groupCommHub.client.groupJoinConfirm = function (groupName) {
 
                 processGroupJoin(groupName);
             };
 
-
+            //Processar mensagem de mudanca de estado
             groupCommHub.client.changeStage = function (newStage) {
                 switch (newStage) {
                     case "stage2":
@@ -286,22 +292,27 @@
                 }
             };
 
+            //Processar menassagem de mudanca de estado dos grupos
             groupCommHub.client.ackGroupStatus = function (newStatus) {
                 openGroup = newStatus;
                 $('#open-closed-groups').text(openGroup ? 'Fechar grupos' : 'Abrir grupos');
             };
 
+            //Processar mensagem com lista de grupos
             groupCommHub.client.groupList = function (groupList) {
                 console.log('Got group list from server: ', groupList);
                 parseGroupList(groupList);
             };
 
+            //Processar mensagem de confirmacao de admin
             groupCommHub.client.youAreAdmin = function () {
                 $('#admin-div').show();
             };
 
+            //Input para nome de usuario
             $('#displayname').val(prompt('Digite seu nome:', ''));
             $('#message').focus();
+            
             $.connection.hub.start().done(function () {
                 //Mensagem de oi
                 groupCommHub.server.hello();
